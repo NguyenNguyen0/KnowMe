@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.ingest.youtube import COLUMNS, json_files
+from core.ingest.youtube import COLUMNS, is_ad, json_files
 
 ACTIVITY_ROOTS = ("My Activity/", "Hoạt động của tôi/")
 SKIP = {"YouTube", "Ads", "Quảng cáo", "Takeout"}
@@ -32,6 +32,9 @@ SLUGS = {
     "Chế độ AI": "ai_mode",
     "Google Play Store": "play_store",
     "Cửa hàng Google Play": "play_store",
+    # VI names whose ASCII fallback would differ from the EN slug (Hotels -> hotels, Help -> help).
+    "Khách sạn": "hotels",
+    "Trợ giúp": "help",
 }
 
 
@@ -61,11 +64,10 @@ def parse(paths: list[Path], account: str) -> pd.DataFrame:
             if "time" not in item:
                 continue
             title = item.get("title", "")
-            details = " ".join(d.get("name", "") for d in item.get("details") or [])
             meta = {
                 "verb": title.split(" ", 1)[0],
                 "url": item.get("titleUrl"),
-                "is_ad": "Google Ads" in details,
+                "is_ad": is_ad(item),
             }
             rows.append(
                 {

@@ -14,7 +14,7 @@ NIGHT_CUTOFF_HOURS = 5
 
 
 def nightly(
-    con: duckdb.DuckDBPyConnection, account: str, since: str | None = None, until: str | None = None
+    con: duckdb.DuckDBPyConnection, account: str | None, since: str | None = None, until: str | None = None
 ) -> pd.DataFrame:
     """Per month: median time of the last watch each night, share of nights past midnight,
     share of watches in 22h-1h."""
@@ -39,7 +39,7 @@ def nightly(
 
 
 def yearly(
-    con: duckdb.DuckDBPyConnection, account: str, since: str | None = None, until: str | None = None
+    con: duckdb.DuckDBPyConnection, account: str | None, since: str | None = None, until: str | None = None
 ) -> pd.DataFrame:
     """Per year: volume, active days, and per-active-day rate on weekdays vs weekends."""
     return con.execute(
@@ -59,7 +59,7 @@ def yearly(
 
 
 def quarterly(
-    con: duckdb.DuckDBPyConnection, account: str, since: str | None = None, until: str | None = None
+    con: duckdb.DuckDBPyConnection, account: str | None, since: str | None = None, until: str | None = None
 ) -> pd.DataFrame:
     """Per quarter: volume and per-active-day rate."""
     return con.execute(
@@ -81,7 +81,7 @@ SESSION_GAP_S = 1800
 
 
 def monthly_profile(
-    con: duckdb.DuckDBPyConnection, account: str, since: str | None = None, until: str | None = None
+    con: duckdb.DuckDBPyConnection, account: str | None, since: str | None = None, until: str | None = None
 ) -> pd.DataFrame:
     """Per month: how the account watches (long videos vs fast swiping), not just how much."""
     return con.execute(
@@ -103,7 +103,7 @@ def monthly_profile(
 
 def top_channels(
     con: duckdb.DuckDBPyConnection,
-    account: str,
+    account: str | None,
     since: str | None = None,
     until: str | None = None,
     new_only: bool = False,
@@ -114,14 +114,14 @@ def top_channels(
         f"""
         WITH first AS (
             SELECT {CHANNEL} AS ch, min(timestamp) AS first_seen FROM events
-            WHERE account = $account AND action_type = 'watch' GROUP BY ch
+            WHERE ($account::VARCHAR IS NULL OR account = $account) AND action_type = 'watch' GROUP BY ch
         )
         SELECT {CHANNEL} AS channel, count(*) AS watches,
                strftime(timezone('{TZ}', any_value(f.first_seen)), '%Y-%m-%d') AS first_seen,
                coalesce(any_value(c.category), '-') AS category
         FROM events JOIN first f ON f.ch = {CHANNEL}
-        LEFT JOIN channel_categories c ON c.account = events.account AND c.channel = {CHANNEL}
-        WHERE {WHERE.replace("account =", "events.account =")}
+        LEFT JOIN channel_categories c ON c.channel = {CHANNEL}
+        WHERE {WHERE}
           AND (NOT $new_only OR $since::DATE IS NULL OR f.first_seen >= $since::DATE)
         GROUP BY 1 ORDER BY watches DESC, channel LIMIT $limit
         """,
@@ -131,7 +131,7 @@ def top_channels(
 
 def by_category(
     con: duckdb.DuckDBPyConnection,
-    account: str,
+    account: str | None,
     period: str = "quarter",
     since: str | None = None,
     until: str | None = None,
@@ -142,8 +142,8 @@ def by_category(
         SELECT strftime(date_trunc($period, {LOCAL}), '%Y-%m') AS period,
                coalesce(c.category, 'unclassified') AS category, count(*) AS n
         FROM events LEFT JOIN channel_categories c
-          ON c.account = events.account AND c.channel = {CHANNEL}
-        WHERE {WHERE.replace("account =", "events.account =")}
+          ON c.channel = {CHANNEL}
+        WHERE {WHERE}
         GROUP BY ALL
         """,
         {"period": period, **filters("watch", account, since, until, "youtube")},

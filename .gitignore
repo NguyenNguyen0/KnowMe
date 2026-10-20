@@ -221,3 +221,5 @@ __marimo__/
 
 # Workspace
 /.raw
+# KnowMe settings: holds personal account ids
+/config.yaml

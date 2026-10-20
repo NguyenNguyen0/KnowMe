@@ -31,6 +31,13 @@ PREFIXES = {
     "Đã tìm kiếm ": "search",
 }
 COLUMNS = ["timestamp", "source", "account", "action_type", "content", "metadata"]
+# details[].name of an ad entry: EN "From Google Ads", VI "Từ Quảng cáo trên Google".
+AD_MARKERS = ("Google Ads", "Quảng cáo trên Google")
+
+
+def is_ad(item: dict) -> bool:
+    details = " ".join(d.get("name", "") for d in item.get("details") or [])
+    return any(m in details for m in AD_MARKERS)
 
 
 def _wanted(name: str) -> bool:
@@ -69,7 +76,6 @@ def _action(title: str) -> tuple[str, str]:
 def _record(item: dict, account: str) -> dict:
     action_type, content = _action(item.get("title", ""))
     channel = (item.get("subtitles") or [{}])[0]
-    details = " ".join(d.get("name", "") for d in item.get("details") or [])
     return {
         "timestamp": item["time"],
         "source": "youtube",
@@ -81,7 +87,7 @@ def _record(item: dict, account: str) -> dict:
                 "url": item.get("titleUrl"),
                 "channel": channel.get("name"),
                 "channel_url": channel.get("url"),
-                "is_ad": "Google Ads" in details,
+                "is_ad": is_ad(item),
             },
             ensure_ascii=False,
         ),

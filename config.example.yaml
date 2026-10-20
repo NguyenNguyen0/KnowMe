@@ -1,0 +1,18 @@
+# Copy to config.yaml (gitignored) and fill in your account ids.
+# Every field is optional; these are the defaults except `accounts`.
+raw_dir: .raw
+db: .raw/processed/events.duckdb
+inbox: ~/Documents/Obsidian Vault/00-Inbox   # `just insight ... --save` writes notes here
+
+# id = the <account> part of .raw/google-<account>/ and .raw/facebook-<account>/.
+# The first account is the default for --account.
+accounts:
+  - id: personal-account
+    label: cá nhân, giải trí
+  - id: work-account
+    label: học tập, làm việc
+
+llm:
+  base_url: http://localhost:8080/v1
+  workers: 2        # parallel requests, at most the llama-server slot count
+  max_tokens: 1024

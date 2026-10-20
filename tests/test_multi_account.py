@@ -46,6 +46,8 @@ def test_accounts_question(tmp_path):
     assert monthly["month"].iloc[-1] == "2026-02"  # March is incomplete for both accounts
     assert "acc_a có nhiều sự kiện hơn ở 1/12 tháng: 2026-01" in facts  # empty months lead nobody
     assert "acc_b có nhiều sự kiện hơn ở 1/12 tháng: 2026-02" in facts
+    assert not any("Không có tháng nào đảo chiều" in f for f in facts)
+    assert "acc_a: có hoạt động 59/365 ngày (16%)" in facts  # Jan + Feb 2026
     a = next(f for f in facts if f.startswith("acc_a: chiếm"))
     assert "giờ cao điểm 20h" in a and "0% trong 8h-17h" in a
     b = next(f for f in facts if f.startswith("acc_b: chiếm"))

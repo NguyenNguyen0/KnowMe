@@ -232,7 +232,7 @@ def _accounts(con: duckdb.DuckDBPyConnection, a: str | None = None, date: str | 
     df = con.execute(
         f"""
         SELECT strftime(date_trunc('month', {common.LOCAL}), '%Y-%m') AS month, account,
-               hour({common.LOCAL}) AS hour
+               hour({common.LOCAL}) AS hour, {common.LOCAL}::DATE AS day
         FROM events
         WHERE source IN {COMPARE_SOURCES} AND (metadata->>'is_ad') IS DISTINCT FROM 'true'
           AND timestamp >= $since::DATE AND timestamp < $until::DATE
@@ -254,6 +254,13 @@ def _accounts(con: duckdb.DuckDBPyConnection, a: str | None = None, date: str | 
     alone = monthly.eq(monthly.max(axis=1), axis=0).sum(axis=1) == 1
     lead = monthly.idxmax(axis=1).where(alone)
     fact_lines = [f"Dữ liệu của {acc}: từ {lo} đến {hi}" for acc, lo, hi in ends]
+    leaders = set(lead.dropna())
+    if len(leaders) == 1:
+        fact_lines.append(f"Không có tháng nào đảo chiều: {leaders.pop()} có nhiều sự kiện hơn ở mọi tháng có dữ liệu")
+    # Event counts favour fast swiping (one Short = one event); active days compare usage fairly.
+    days = (until - since).days
+    active = df.groupby("account")["day"].nunique().reindex(accounts, fill_value=0)
+    fact_lines += [f"{acc}: có hoạt động {n}/{days} ngày ({n / days * 100:.0f}%)" for acc, n in active.items()]
     fact_lines += facts(monthly.reset_index(names="month"), "month", accounts)
     for acc in accounts:
         months = list(monthly.index[lead == acc])

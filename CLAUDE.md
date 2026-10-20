@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 KnowMe: export personal data from platforms (LinkedIn, YouTube, Facebook, ...), normalize it into one schema, store it in DuckDB, aggregate with code, then have an LLM interpret the aggregates as a data analyst.
 
-Plan, architecture and changelog live in the Obsidian vault, not in this repo: `~/Documents/Obsidian Vault/30-Projects/KnowMe/` (`knowme-plan.md`, `knowme-architecture.md`, `knowme-changelog.md`). Read them for version scope before adding features. Current version: v0.2.0 (v0.3.0 in progress on `feat/v0.3.0`).
+Plan, architecture and changelog live in the Obsidian vault, not in this repo: `~/Documents/Obsidian Vault/30-Projects/KnowMe/` (`knowme-plan.md`, `knowme-architecture.md`, `knowme-changelog.md`). Read them for version scope before adding features. Current version: v0.3.0.
 
 ## Rules
 
@@ -49,7 +49,7 @@ Inspect the store from Python (`uv run python`, `duckdb.connect(".raw/processed/
 - `.raw/google-<account>/`: Google Takeout exports, as zips or extracted `Takeout*/` folders (ingest reads both; overlapping exports dedupe in the store). The account id is taken from the folder name.
 - `.raw/facebook-<account>/`: Facebook "Download Your Information" JSON, extracted (zips not supported). Same account id as the Google folder of the same person, so sources join on `account`.
 - `.raw/processed/events.duckdb`: Analytics Store, tables `events` and `channel_categories`.
-- Google My Activity products other than YouTube (Search, Translate, Maps, Image Search, Chrome, Gemini, ...) go in as `source = google`, `action_type` = product slug (`core/ingest/google_activity.py`); Ads and Takeout are skipped, `locationInfos` never stored.
+- Google My Activity products other than YouTube (Search, Translate, Maps, Image Search, Chrome, Gemini, ...) go in as `source = google`, `action_type` = product slug (`core/ingest/google_activity.py`); Ads and Takeout are skipped, `locationInfos` never stored. Ads are flagged from `details[].name` (EN "From Google Ads", VI "Từ Quảng cáo trên Google": `AD_MARKERS` in `core/ingest/youtube.py`).
 - Takeout must be exported in **JSON** (not the default HTML). Full YouTube history only comes from the **My Activity** product (`My Activity/YouTube/MyActivity.json`, all time); the "YouTube and YouTube Music" history files hold only the last few months.
 - Facebook JSON stores every non-ASCII string as latin-1 mojibake; `core/ingest/facebook.py` fixes it on load. Messages are stored as count-only events (time + sent flag, `content` is a hash): never ingest message text, participant names, IPs, cookies or locations.
 - Files and titles are localized to the account's UI language (one account is English, one Vietnamese). `action_type` is derived from the title prefix: see `FILES`/`ACTIVITY_DIRS`/`PREFIXES` in `core/ingest/youtube.py`.

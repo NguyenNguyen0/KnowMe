@@ -35,3 +35,27 @@ def test_parse_products(tmp_path):
     con = store.connect(tmp_path / "events.duckdb")
     assert store.write_events(con, df) == 4
     assert store.write_events(con, df) == 0
+
+
+# Product folders seen in an EN and a VI export: the same product must get the same slug,
+# or comparing accounts splits one product into two kinds.
+EN_VI = {
+    "Search": "Tìm kiếm",
+    "Image Search": "Tìm kiếm hình ảnh",
+    "Video Search": "Tìm kiếm video",
+    "Gemini Apps": "Các ứng dụng Gemini",
+    "AI Mode": "Chế độ AI",
+    "Google Play Store": "Cửa hàng Google Play",
+    "Google Translate": "Google Dịch",
+    "Hotels": "Khách sạn",
+    "Help": "Trợ giúp",
+    "Maps": "Maps",
+    "Gmail": "Gmail",
+    "Developers": "Developers",
+    "Google Analytics": "Google Analytics",
+}
+
+
+def test_slug_same_in_en_and_vi():
+    for en, vi in EN_VI.items():
+        assert google_activity._slug(en) == google_activity._slug(vi), (en, vi)

@@ -16,9 +16,10 @@ from core.aggregate import youtube as yt
 Context = tuple[dict[str, pd.DataFrame], list[str]]  # ({description: table}, facts)
 
 
-def _last_day(con: duckdb.DuckDBPyConnection, account: str) -> pd.Timestamp:
+def _last_day(con: duckdb.DuckDBPyConnection, account: str | None) -> pd.Timestamp:
     day = con.execute(
-        f"SELECT max({common.LOCAL})::DATE FROM events WHERE account = ?", [account]
+        f"SELECT max({common.LOCAL})::DATE FROM events WHERE $a::VARCHAR IS NULL OR account = $a",
+        {"a": account},
     ).fetchone()[0]
     return pd.Timestamp(day)
 
@@ -212,6 +213,67 @@ def _around(con: duckdb.DuckDBPyConnection, a: str, date: str | None = None) -> 
     return tables, fact_lines
 
 
+COMPARE_SOURCES = ("youtube", "google")  # every Google account has these; Facebook belongs to one
+
+
+def _accounts(con: duckdb.DuckDBPyConnection, a: str | None = None, date: str | None = None) -> Context:
+    """Every account side by side (`a` is ignored): how much each is used, per month and per hour."""
+    ends = con.execute(
+        f"""
+        SELECT account, min({common.LOCAL})::DATE, max({common.LOCAL})::DATE FROM events
+        WHERE source IN {COMPARE_SOURCES} GROUP BY 1 ORDER BY 1
+        """
+    ).fetchall()
+    if len(ends) < 2:
+        raise ValueError("question 'accounts' needs YouTube/Google data for at least 2 accounts")
+    # Stop at the earliest export end: after it, one account would look idle when it is just not exported.
+    until = pd.Timestamp(min(e for _, _, e in ends)).to_period("M").start_time
+    since = until - pd.DateOffset(months=12)
+    df = con.execute(
+        f"""
+        SELECT strftime(date_trunc('month', {common.LOCAL}), '%Y-%m') AS month, account,
+               hour({common.LOCAL}) AS hour
+        FROM events
+        WHERE source IN {COMPARE_SOURCES} AND (metadata->>'is_ad') IS DISTINCT FROM 'true'
+          AND timestamp >= $since::DATE AND timestamp < $until::DATE
+        """,
+        {"since": since.strftime("%Y-%m-%d"), "until": until.strftime("%Y-%m-%d")},
+    ).df()
+    accounts = [acc for acc, _, _ in ends]
+    monthly = (
+        df.pivot_table(index="month", columns="account", values="hour", aggfunc="size", fill_value=0)
+        .reindex(columns=accounts, fill_value=0)
+        .reindex(pd.period_range(since, until - pd.Timedelta(days=1), freq="M").strftime("%Y-%m"), fill_value=0)
+        .astype(int)
+    )
+    by_hour = df.pivot_table(index="hour", columns="account", values="month", aggfunc="size", fill_value=0)
+    by_hour = by_hour.reindex(index=range(24), columns=accounts, fill_value=0)
+    pct_hour = (by_hour / by_hour.sum().where(lambda t: t > 0) * 100).fillna(0).round(1)
+
+    # A month leads to one account only if it alone has the most events (all-zero months lead nobody).
+    alone = monthly.eq(monthly.max(axis=1), axis=0).sum(axis=1) == 1
+    lead = monthly.idxmax(axis=1).where(alone)
+    fact_lines = [f"Dữ liệu của {acc}: từ {lo} đến {hi}" for acc, lo, hi in ends]
+    fact_lines += facts(monthly.reset_index(names="month"), "month", accounts)
+    for acc in accounts:
+        months = list(monthly.index[lead == acc])
+        h = pct_hour[acc]
+        fact_lines += [
+            f"{acc} có nhiều sự kiện hơn ở {len(months)}/{len(monthly)} tháng"
+            + (f": {', '.join(months)}" if months else ""),
+            f"{acc}: chiếm {monthly[acc].sum() / max(monthly.values.sum(), 1) * 100:.0f}% tổng sự kiện; "
+            f"giờ cao điểm {h.idxmax()}h ({h.max():g}%); {h[8:17].sum():.0f}% trong 8h-17h; "
+            f"{h[[22, 23, 0]].sum():.0f}% trong 22h-1h",
+        ]
+    tables = {
+        "Số sự kiện YouTube + Google (xem, tìm kiếm, dịch, bản đồ...) theo tháng, mỗi cột một "
+        "tài khoản, 12 tháng trọn mà mọi tài khoản đều có dữ liệu": monthly.reset_index(names="month"),
+        "% sự kiện của mỗi tài khoản theo giờ trong ngày (mỗi cột cộng lại 100%), cùng 12 tháng":
+            pct_hour.reset_index(names="hour"),
+    }
+    return tables, fact_lines
+
+
 # question id -> (question, context builder, subject)
 Builder = Callable[[duckdb.DuckDBPyConnection, str, str | None], Context]
 QUESTIONS: dict[str, tuple[str, Builder, str]] = {
@@ -245,9 +307,15 @@ QUESTIONS: dict[str, tuple[str, Builder, str]] = {
         _around,
         "YouTube, Google và Facebook",
     ),
+    "accounts": (
+        "Các tài khoản được dùng khác nhau thế nào: tài khoản nào hoạt động nhiều hơn, có giai đoạn "
+        "nào đảo chiều không, và mỗi tài khoản thường dùng vào khung giờ nào?",
+        _accounts,
+        "YouTube và Google",
+    ),
 }
 
-TEMPLATE = """Bạn là data analyst. Dưới đây là số liệu ĐÃ TÍNH SẴN về lịch sử hoạt động trên {subject} của một người \
+TEMPLATE = """Bạn là data analyst. Dưới đây là số liệu ĐÃ TÍNH SẴN về lịch sử hoạt động trên {subject} của một người{who} \
 (giờ Việt Nam, đã loại quảng cáo, dữ liệu đến hết ngày {last_day}).
 
 Quy tắc:
@@ -268,9 +336,20 @@ Trả lời bằng tiếng Việt, tối đa 6 gạch đầu dòng, kết thúc 
 
 
 def build_prompt(
-    con: duckdb.DuckDBPyConnection, question_id: str, account: str, date: str | None = None
+    con: duckdb.DuckDBPyConnection,
+    question_id: str,
+    account: str | None,
+    date: str | None = None,
+    labels: dict[str, str] | None = None,
 ) -> str:
+    """labels: account id -> what the account is used for (config.yaml), so the model knows."""
     question, context, subject = QUESTIONS[question_id]
+    labels = labels or {}
+    if question_id == "accounts":
+        who = "; ".join(f"{k} = tài khoản {v}" for k, v in labels.items())
+        who = f", có nhiều tài khoản ({who})" if who else ", có nhiều tài khoản"
+    else:
+        who = f" (tài khoản {labels[account]})" if account in labels else ""
     tables, fact_lines = context(con, account, date)
     body = "\n\n".join(f"### {desc}\n{df.to_csv(index=False).strip()}" for desc, df in tables.items())
     return TEMPLATE.format(
@@ -280,4 +359,5 @@ def build_prompt(
         facts="\n".join(f"- {f}" for f in fact_lines),
         question=question.format(date=date),
         subject=subject,
+        who=who,
     )

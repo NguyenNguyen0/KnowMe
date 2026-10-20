@@ -73,18 +73,22 @@ def by_hour(
 
 def activity(
     con: duckdb.DuckDBPyConnection,
-    account: str,
+    account: str | None,
     period: str = "day",
     since: str | None = None,
     until: str | None = None,
 ) -> pd.DataFrame:
-    """Cross-source timeline: one column per source.action_type, event counts per period."""
+    """Cross-source timeline: one column per source.action_type, event counts per period.
+
+    account None = every account side by side, columns prefixed with `account:`.
+    """
     df = con.execute(
         f"""
         SELECT strftime(date_trunc($period, {LOCAL}), '%Y-%m-%d') AS period,
-               source || '.' || action_type AS kind, count(*) AS n
+               if($account::VARCHAR IS NULL, account || ':', '') || source || '.' || action_type AS kind,
+               count(*) AS n
         FROM events
-        WHERE account = $account AND (metadata->>'is_ad') IS DISTINCT FROM 'true'
+        WHERE ($account::VARCHAR IS NULL OR account = $account) AND (metadata->>'is_ad') IS DISTINCT FROM 'true'
           AND ($since::DATE IS NULL OR timestamp >= $since::DATE)
           AND ($until::DATE IS NULL OR timestamp < $until::DATE)
         GROUP BY ALL

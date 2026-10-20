@@ -32,6 +32,9 @@ SLUGS = {
     "Chế độ AI": "ai_mode",
     "Google Play Store": "play_store",
     "Cửa hàng Google Play": "play_store",
+    # VI names whose ASCII fallback would differ from the EN slug (Hotels -> hotels, Help -> help).
+    "Khách sạn": "hotels",
+    "Trợ giúp": "help",
 }
 
 

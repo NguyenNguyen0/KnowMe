@@ -17,20 +17,31 @@ CREATE TABLE IF NOT EXISTS events (
     metadata JSON,
     PRIMARY KEY ({", ".join(KEY)})
 );
--- Enrichment from core/classify.py: one topic per channel.
+-- Enrichment from core/classify.py: one topic per channel, shared by every account.
 CREATE TABLE IF NOT EXISTS channel_categories (
-    account VARCHAR NOT NULL,
-    channel VARCHAR NOT NULL,
-    category VARCHAR NOT NULL,
-    PRIMARY KEY (account, channel)
+    channel VARCHAR PRIMARY KEY,
+    category VARCHAR NOT NULL
 );
+"""
+# ponytail: one-off migration of v0.2 stores (topics keyed by account, channel); drop after v0.3.
+MIGRATE_V02 = """
+CREATE TEMP TABLE cc AS SELECT channel, min(category) AS category FROM channel_categories GROUP BY channel;
+DROP TABLE channel_categories;
 """
 
 
 def connect(db_path: Path) -> duckdb.DuckDBPyConnection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
+    old = con.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'channel_categories' AND column_name = 'account'"
+    ).fetchone()
+    if old:
+        con.execute(MIGRATE_V02)
     con.execute(SCHEMA)
+    if old:
+        con.execute("INSERT INTO channel_categories SELECT * FROM cc; DROP TABLE cc")
     return con
 
 
